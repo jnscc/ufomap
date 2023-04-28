@@ -89,8 +89,20 @@ Server::Server(ros::NodeHandle &nh, ros::NodeHandle &nh_priv)
 	reset_server_ = nh_priv_.advertiseService("reset", &Server::resetCallback, this);
 	save_map_server_ =
 	    nh_priv_.advertiseService("save_map", &Server::saveMapCallback, this);
+	//get some parameter
+	std::string depth_topic_,odom_topic_;
+	nh_priv_.param("depth_topic",depth_topic_,std::string("/depth"));
+	nh_priv_.param("odom_topic",odom_topic_,std::string("/odom"));
+	depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(nh_priv_, depth_topic_, 50));
+	odom_sub_.reset(new message_filters::Subscriber<nav_msgs::Odometry>(nh_priv_, odom_topic_, 100));
+	sync_image_odom_.reset(new message_filters::Synchronizer<SyncPolicyImageOdom>(
+	    SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_));
+	sync_image_odom_->registerCallback(boost::bind(&Server::depthOdomCallback, this, _1, _2));
 }
+void Server::depthOdomCallback(const sensor_msgs::ImageConstPtr &img, const nav_msgs::OdometryConstPtr &odom)
+{
 
+}
 void Server::cloudCallback(sensor_msgs::PointCloud2::ConstPtr const &msg)
 {
 	ufo::math::Pose6 transform;

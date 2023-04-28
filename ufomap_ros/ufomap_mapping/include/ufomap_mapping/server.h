@@ -58,12 +58,19 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_sensor_msgs/tf2_sensor_msgs.h>
-
+#include <nav_msgs/Odometry.h>
+#include "sensor_msgs/Image.h"
+#include "sensor_msgs/PointCloud2.h"
+#include "sensor_msgs/PointCloud.h"
+#include <message_filters/subscriber.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <message_filters/sync_policies/exact_time.h>
+#include <message_filters/time_synchronizer.h>
 // STD
 #include <future>
 #include <variant>
 #include <vector>
-
+#include <memory>
 namespace ufomap_mapping
 {
 class Server
@@ -94,19 +101,31 @@ class Server
 
 	void configCallback(ufomap_mapping::ServerConfig &config, uint32_t level);
 
+	void depthOdomCallback(const sensor_msgs::ImageConstPtr& img,const nav_msgs::OdometryConstPtr& odom) ;
  private:
 	//
 	// ROS parameters
 	//
+	typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, nav_msgs::Odometry>
+	    SyncPolicyImageOdom;
+	typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::PointCloud2 , nav_msgs::Odometry>
+	    SyncPolicyPointsCloud2Odom;
+	typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::PointCloud , nav_msgs::Odometry>
+	    SyncPolicyPointsCloudOdom;
+	typedef std::shared_ptr<message_filters::Synchronizer<SyncPolicyImageOdom>> SynchronizerImageOdom;
+	typedef std::shared_ptr<message_filters::Synchronizer<SyncPolicyPointsCloud2Odom>> SynchronizerPointsCloud2Odom;
+	typedef std::shared_ptr<message_filters::Synchronizer<SyncPolicyPointsCloudOdom>> SynchronizerPointsCloudOdom;
 
 	// Node handles
 	ros::NodeHandle &nh_;
 	ros::NodeHandle &nh_priv_;
 
 	// Subscribers
-	ros::Subscriber cloud_sub_;
+	ros::Subscriber cloud_sub_,depth_img_sub_;
 	unsigned int cloud_in_queue_size_;
-
+	std::shared_ptr<message_filters::Subscriber<sensor_msgs::Image>> depth_sub_;
+	std::shared_ptr<message_filters::Subscriber<nav_msgs::Odometry>> odom_sub_;
+	SynchronizerImageOdom sync_image_odom_;
 	// Publishers
 	std::vector<ros::Publisher> map_pub_;
 	unsigned int map_queue_size_;
@@ -161,6 +180,7 @@ class Server
 	//
 	// Information
 	//
+	nav_msgs::Odometry odom_;
 
 	// Integration
 	double min_integration_time_;
