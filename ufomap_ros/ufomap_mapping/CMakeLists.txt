@@ -20,10 +20,12 @@ find_package(catkin REQUIRED COMPONENTS
   ufomap_msgs
   ufomap_ros
   ufomap_srvs
+  cv_bridge
 )
 
 find_package(ufomap REQUIRED)
-
+find_package(OpenCV REQUIRED)
+find_package(Eigen3 REQUIRED)
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -128,6 +130,7 @@ catkin_package(
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 ## Declare a C++ executable
@@ -151,6 +154,7 @@ add_dependencies(${PROJECT_NAME}_server_node ${${PROJECT_NAME}_EXPORTED_TARGETS}
 ## Specify libraries to link a library or executable target against
 target_link_libraries(${PROJECT_NAME}_server_node
   ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
   UFO::Map
 )
 

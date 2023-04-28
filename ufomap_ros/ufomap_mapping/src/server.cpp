@@ -79,6 +79,7 @@ Server::Server(ros::NodeHandle &nh, ros::NodeHandle &nh_priv)
 	// Set up dynamic reconfigure server
 	cs_.setCallback(boost::bind(&Server::configCallback, this, _1, _2));
 
+	has_first_depth= false;
 	// Set up publisher
 	info_pub_ = nh_priv_.advertise<diagnostic_msgs::DiagnosticStatus>("info", 10, false);
 
@@ -90,9 +91,31 @@ Server::Server(ros::NodeHandle &nh, ros::NodeHandle &nh_priv)
 	save_map_server_ =
 	    nh_priv_.advertiseService("save_map", &Server::saveMapCallback, this);
 	//get some parameter
-	std::string depth_topic_,odom_topic_;
+	std::string depth_topic_,odom_topic_,points_cloud_topic_,config_file_path_;
+	nh_priv_.param("config_file_path_", config_file_path_,std::string("file") );
 	nh_priv_.param("depth_topic",depth_topic_,std::string("/depth"));
+	nh_priv_.param("points_cloud_topic",points_cloud_topic_,std::string("/pointsCloud"));
 	nh_priv_.param("odom_topic",odom_topic_,std::string("/odom"));
+	nh_priv_.param("depth_scaling_factor",depth_scaling_factor_,1000);
+	nh_priv_.param("using_depth_filter",usign_depth_filter,true);
+	nh_priv_.param("depth_filter_margin",depth_filter_margin_,-1);
+	nh_priv_.param("depth_filter_maxdist",depth_filter_maxdist_,-1.0);
+	nh_priv_.param("depth_filter_mindist",depth_filter_mindist_,-1.0);
+
+	nh_priv_.param("skip_pixel",skip_pixel_,2);
+	nh_priv_.param("max_ray_length",max_ray_length_,-0.1);
+	nh_priv_.param("cx",cx_,-1.0);
+	nh_priv_.param("cy",cy_,-1.0);
+	nh_priv_.param("fx",fx_,-1.0);
+	nh_priv_.param("fy",fy_,-1.0);
+
+	cv::Mat cv_t;
+	cv::FileStorage config_file(config_file_path_, cv::FileStorage::READ);
+	config_file["T_Left"] >> cv_t;
+	cv::cv2eigen(cv_t,t_left);
+	config_file["T_Pose"] >> cv_t;
+	cv::cv2eigen(cv_t,t_pose);
+
 	depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(nh_priv_, depth_topic_, 50));
 	odom_sub_.reset(new message_filters::Subscriber<nav_msgs::Odometry>(nh_priv_, odom_topic_, 100));
 	sync_image_odom_.reset(new message_filters::Synchronizer<SyncPolicyImageOdom>(
@@ -101,8 +124,96 @@ Server::Server(ros::NodeHandle &nh, ros::NodeHandle &nh_priv)
 }
 void Server::depthOdomCallback(const sensor_msgs::ImageConstPtr &img, const nav_msgs::OdometryConstPtr &odom)
 {
+	odom_=*odom;
+	qua_.x()=odom->pose.pose.orientation.x;
+	qua_.y()=odom->pose.pose.orientation.y;
+	qua_.z()=odom->pose.pose.orientation.z;
+	qua_.w()=odom->pose.pose.orientation.w;
+
+	pose_.x()=odom->pose.pose.position.x;
+	pose_.y()=odom->pose.pose.position.y;
+	pose_.z()=odom->pose.pose.position.z;
+	/* get depth image */
+	cv_bridge::CvImagePtr cv_ptr;
+	cv_ptr = cv_bridge::toCvCopy(img, img->encoding);
+	if (img->encoding == sensor_msgs::image_encodings::TYPE_32FC1) {
+		(cv_ptr->image).convertTo(cv_ptr->image, CV_16UC1, depth_scaling_factor_);
+	}
+	cv_ptr->image.copyTo(depth_image_);
+}
+void Server::processDepthImage()
+{
+	uint16_t* row_ptr;
+	// int cols = current_img_.cols, rows = current_img_.rows;
+	int cols = depth_image_.cols;
+	int rows = depth_image_.rows;
+
+	double depth;
+
+	Eigen::Matrix3d camera_r = qua_.toRotationMatrix();
+
+	pose_ =t_pose*pose_;
+
+	if (!usign_depth_filter) {
+		for (int v = 0; v < rows; v++) {
+			row_ptr = depth_image_.ptr<uint16_t>(v);
+
+			for (int u = 0; u < cols; u++) {
+
+				Eigen::Vector3d proj_pt;
+				depth = (*row_ptr++) / depth_scaling_factor_;
+				proj_pt(0) = (u - cx_) * depth / fx_;
+				proj_pt(1) = (v - cy_) * depth / fy_;
+				proj_pt(2) = depth;
+
+				proj_pt = camera_r * t_left*proj_pt + pose_;
+			}
+		}
+	}
+	/* use depth filter */
+	else {
+		if (!has_first_depth)
+			has_first_depth = true;
+		else {
+			Eigen::Vector3d pt_cur, pt_world, pt_reproj;
+
+			const double inv_factor = 1.0 / depth_scaling_factor_;
+
+			for (int v = depth_filter_margin_; v < rows - depth_filter_margin_; v += skip_pixel_)
+			{
+				row_ptr = depth_image_.ptr<uint16_t>(v) + depth_filter_margin_;
+
+				for (int u = depth_filter_margin_; u < cols - depth_filter_margin_;u += skip_pixel_)
+				{
+
+					depth = (*row_ptr) * inv_factor;
+					row_ptr = row_ptr + skip_pixel_;
+
+					// filter depth
+					// depth += rand_noise_(eng_);
+					// if (depth > 0.01) depth += rand_noise2_(eng_);
+
+					if (*row_ptr == 0) {
+						depth = max_ray_length_ + 0.1;
+					} else if (depth < depth_filter_mindist_) {
+						continue;
+					} else if (depth > depth_filter_maxdist_) {
+						depth = max_ray_length_ + 0.1;
+					}
+
+					// project to world frame
+					pt_cur(0) = (u - cx_) * depth / fx_;
+					pt_cur(1) = (v - cy_) * depth / fy_;
+					pt_cur(2) = depth;
+
+					pt_world = camera_r * t_left*pt_cur + pose_;
+				}
+			}
+		}
+	}
 
 }
+
 void Server::cloudCallback(sensor_msgs::PointCloud2::ConstPtr const &msg)
 {
 	ufo::math::Pose6 transform;

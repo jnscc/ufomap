@@ -66,11 +66,18 @@
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/sync_policies/exact_time.h>
 #include <message_filters/time_synchronizer.h>
+#include <cv_bridge/cv_bridge.h>
 // STD
 #include <future>
 #include <variant>
 #include <vector>
 #include <memory>
+//EIGEN
+#include "Eigen/Dense"
+//CV
+#include "opencv/cv.hpp"
+#include <opencv2/opencv.hpp>
+#include <opencv2/core/eigen.hpp>
 namespace ufomap_mapping
 {
 class Server
@@ -102,6 +109,8 @@ class Server
 	void configCallback(ufomap_mapping::ServerConfig &config, uint32_t level);
 
 	void depthOdomCallback(const sensor_msgs::ImageConstPtr& img,const nav_msgs::OdometryConstPtr& odom) ;
+
+	void processDepthImage();
  private:
 	//
 	// ROS parameters
@@ -135,6 +144,9 @@ class Server
 	ros::Time last_update_time_;
 	ros::Publisher info_pub_;
 
+	//timer
+	ros::Timer depth_img_timer;
+
 	// Services
 	ros::ServiceServer get_map_server_;
 	ros::ServiceServer clear_volume_server_;
@@ -152,11 +164,17 @@ class Server
 	//
 	// UFO Parameters
 	//
-
+	int depth_scaling_factor_;
+	bool usign_depth_filter;
+	bool has_first_depth=false;
 	// Map
+
 	std::variant<std::monostate, ufo::map::OccupancyMap, ufo::map::OccupancyMapColor> map_;
 	std::string frame_id_;
-
+	double fx_,fy_,cx_,cy_;
+	double depth_filter_maxdist_,depth_filter_mindist_,max_ray_length_;
+	int depth_filter_margin_,skip_pixel_;
+	Eigen::Matrix3d t_left,t_pose;
 	// Integration
 	double max_range_;
 	ufo::map::DepthType insert_depth_;
@@ -180,7 +198,6 @@ class Server
 	//
 	// Information
 	//
-	nav_msgs::Odometry odom_;
 
 	// Integration
 	double min_integration_time_;
@@ -208,6 +225,14 @@ class Server
 
 	// Verbose
 	bool verbose_;
+
+	//ros data
+	nav_msgs::Odometry odom_;
+	Eigen::Quaterniond qua_;
+	Eigen::Vector3d pose_;
+	sensor_msgs::PointCloud2  points_cloud_;
+	//cv data
+cv::Mat depth_image_;
 };
 }  // namespace ufomap_mapping
 
